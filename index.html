@@ -106,6 +106,7 @@
         margin-bottom: 0.5rem;
         transition: all 0.3s ease;
         cursor: pointer;
+        position: relative;
       }
 
       .site-checkbox:hover {
@@ -118,9 +119,31 @@
         border-color: #667eea;
       }
 
+      .site-checkbox.dragging {
+        opacity: 0.5;
+        transform: scale(1.05);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+      }
+
       .site-checkbox input[type="checkbox"] {
         margin-right: 0.75rem;
         transform: scale(1.2);
+      }
+
+      .drag-handle {
+        color: #6c757d;
+        cursor: grab;
+        padding: 0 0.5rem;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .drag-handle:active {
+        cursor: grabbing;
+      }
+
+      .site-checkbox:hover .drag-handle {
+        opacity: 1;
       }
 
       .btn-remove {
@@ -197,6 +220,23 @@
         color: white;
       }
 
+      .btn-toggle-select {
+        background: none;
+        border: 1px solid #667eea;
+        border-radius: 8px;
+        padding: 0.375rem 0.75rem;
+        margin-right: 0.5rem;
+        color: #667eea;
+        font-size: 0.875rem;
+        transition: all 0.3s ease;
+        font-weight: 600;
+      }
+
+      .btn-toggle-select:hover {
+        background: #667eea;
+        color: white;
+      }
+
       .search-stats {
         background: linear-gradient(135deg, #17a2b8, #6f42c1);
         color: white;
@@ -204,6 +244,20 @@
         padding: 1rem;
         margin-top: 1rem;
         text-align: center;
+      }
+
+      .drop-zone {
+        border: 2px dashed #667eea;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 0.25rem 0;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .drop-zone.active {
+        opacity: 1;
+        background: rgba(102, 126, 234, 0.1);
       }
 
       @media (max-width: 768px) {
@@ -271,17 +325,11 @@
             <div class="select-all-controls">
               <button
                 type="button"
-                class="btn-control"
-                onclick="selectAllSites()"
+                class="btn-toggle-select"
+                id="toggleSelectBtn"
+                onclick="toggleSelectAll()"
               >
                 <i class="fas fa-check-double me-1"></i>전체 선택
-              </button>
-              <button
-                type="button"
-                class="btn-control"
-                onclick="deselectAllSites()"
-              >
-                <i class="fas fa-times me-1"></i>전체 해제
               </button>
               <button
                 type="button"
@@ -333,7 +381,7 @@
         </div>
         <small class="text-muted mt-2 d-block">
           <i class="fas fa-info-circle me-1"></i>
-          도메인만 입력하세요 (예: naver.com, github.com)
+          도메인만 입력하세요 (예: naver.com, github.com) | 드래그하여 순서 변경 가능
         </small>
       </div>
 
@@ -346,6 +394,8 @@
     <script>
       const siteListContainer = document.getElementById("siteList");
       const STORAGE_KEY = "customSites";
+      let draggedElement = null;
+      let draggedIndex = null;
 
       // 기본 사이트들을 더 유용한 것들로 업데이트
       const defaultSites = [
@@ -379,29 +429,81 @@
             </div>
           `;
           updateSelectedCount();
+          updateToggleButton();
           return;
         }
 
         sites.forEach((site, index) => {
           const siteDiv = document.createElement("div");
           siteDiv.className = "site-checkbox";
+          siteDiv.draggable = true;
           siteDiv.innerHTML = `
             <div class="d-flex align-items-center justify-content-between">
-              <label class="flex-grow-1 mb-0 cursor-pointer">
-                <input type="checkbox" name="site" value="${site}" 
-                       onchange="updateSelectedCount(); updateCheckboxStyle(this);">
-                <span class="fw-medium">${site}</span>
-              </label>
+              <div class="d-flex align-items-center flex-grow-1">
+                <span class="drag-handle">
+                  <i class="fas fa-grip-vertical"></i>
+                </span>
+                <label class="flex-grow-1 mb-0 cursor-pointer">
+                  <input type="checkbox" name="site" value="${site}" 
+                         onchange="updateSelectedCount(); updateCheckboxStyle(this); updateToggleButton();">
+                  <span class="fw-medium">${site}</span>
+                </label>
+              </div>
               <button type="button" class="btn-remove" onclick="removeSite('${site}')" 
                       title="사이트 제거">
                 <i class="fas fa-trash-alt"></i>
               </button>
             </div>
           `;
+
+          // 드래그 이벤트 리스너 추가
+          siteDiv.addEventListener('dragstart', handleDragStart);
+          siteDiv.addEventListener('dragover', handleDragOver);
+          siteDiv.addEventListener('drop', handleDrop);
+          siteDiv.addEventListener('dragend', handleDragEnd);
+
           siteListContainer.appendChild(siteDiv);
         });
 
         updateSelectedCount();
+        updateToggleButton();
+      }
+
+      function handleDragStart(e) {
+        draggedElement = e.target;
+        draggedIndex = Array.from(siteListContainer.children).indexOf(draggedElement);
+        draggedElement.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      }
+
+      function handleDragOver(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      }
+
+      function handleDrop(e) {
+        e.preventDefault();
+        if (draggedElement !== e.target.closest('.site-checkbox')) {
+          const dropTarget = e.target.closest('.site-checkbox');
+          const dropIndex = Array.from(siteListContainer.children).indexOf(dropTarget);
+          
+          if (dropIndex !== -1 && draggedIndex !== dropIndex) {
+            const sites = getStoredSites();
+            const movedSite = sites.splice(draggedIndex, 1)[0];
+            sites.splice(dropIndex, 0, movedSite);
+            saveSites(sites);
+            renderSiteList();
+            showAlert(`사이트 순서가 변경되었습니다.`, "success");
+          }
+        }
+      }
+
+      function handleDragEnd(e) {
+        if (draggedElement) {
+          draggedElement.classList.remove('dragging');
+        }
+        draggedElement = null;
+        draggedIndex = null;
       }
 
       function updateCheckboxStyle(checkbox) {
@@ -422,22 +524,38 @@
           `선택된 사이트: ${count}개`;
       }
 
-      function selectAllSites() {
+      function updateToggleButton() {
         const checkboxes = document.querySelectorAll('input[name="site"]');
-        checkboxes.forEach((cb) => {
-          cb.checked = true;
-          updateCheckboxStyle(cb);
-        });
-        updateSelectedCount();
+        const checkedBoxes = document.querySelectorAll('input[name="site"]:checked');
+        const toggleBtn = document.getElementById("toggleSelectBtn");
+        
+        if (checkboxes.length === 0) {
+          toggleBtn.disabled = true;
+          toggleBtn.innerHTML = '<i class="fas fa-check-double me-1"></i>전체 선택';
+          return;
+        }
+        
+        toggleBtn.disabled = false;
+        
+        if (checkedBoxes.length === checkboxes.length && checkboxes.length > 0) {
+          toggleBtn.innerHTML = '<i class="fas fa-times me-1"></i>전체 해제';
+        } else {
+          toggleBtn.innerHTML = '<i class="fas fa-check-double me-1"></i>전체 선택';
+        }
       }
 
-      function deselectAllSites() {
+      function toggleSelectAll() {
         const checkboxes = document.querySelectorAll('input[name="site"]');
+        const checkedBoxes = document.querySelectorAll('input[name="site"]:checked');
+        const shouldCheck = checkedBoxes.length !== checkboxes.length;
+        
         checkboxes.forEach((cb) => {
-          cb.checked = false;
+          cb.checked = shouldCheck;
           updateCheckboxStyle(cb);
         });
+        
         updateSelectedCount();
+        updateToggleButton();
       }
 
       function deleteAllSites() {
@@ -601,6 +719,7 @@
           firstCheckbox.checked = true;
           updateCheckboxStyle(firstCheckbox);
           updateSelectedCount();
+          updateToggleButton();
         }
       }, 100);
     </script>
